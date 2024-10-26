@@ -35,8 +35,156 @@ export class Button extends GOVUKFrontendComponent {
       normaliseDataset(Button, this.$root.dataset)
     )
 
+    // Find the parent form if this is a submit button
+    this.$form = this.$root.closest('form');
+
     this.$root.addEventListener('keydown', (event) => this.handleKeyDown(event))
-    this.$root.addEventListener('click', (event) => this.debounce(event))
+    this.$root.addEventListener('click', (event) => this.handleClick(event))
+  }
+
+  /**
+   * Handle click events
+   * @param {MouseEvent} event - Click event
+   */
+  handleClick(event) {
+    // Handle debouncing first
+    if (this.debounce(event) === false) {
+      return;
+    }
+
+    // If validation is enabled and this is a submit button in a form
+    if (this.config.enableValidation &&
+        this.$form &&
+        this.$root.getAttribute('type') === 'submit') {
+          this.handleFormSubmit(event);
+    }
+  }
+    
+  /**
+   * Handle form submission and validation
+   * @param {Event} event - The submission event
+   */
+  handleFormSubmit(event) {
+    // Clear any existing errors first
+    this.clearErrors();
+
+    const validationSelectors = this.config.validationSelectors || {};
+    let isValid = true;
+    const errors = [];
+
+    for (const [field, selector] of Object.entries(validationSelectors)) {
+      const $element = this.$form.querySelector(selector);
+      if (!$element) continue;
+
+      const valid = this.validateElement($element, field);
+      if (!valid) {
+        isValid = false;
+        errors.push({
+          field,
+          element: $element,
+          message: this.config.validationMessages?.[field] || 'This field is required'
+        });
+      }
+    }
+
+    if (!isValid) {
+      event.preventDefault();
+      this.showErrors(errors);
+
+      if (this.config.focusOnError && errors.length > 0) {
+        errors[0].element.focus();
+      }
+    }
+  }
+
+  /**
+   * Validate a single form element
+   * @param {Element} $element - The element to validate
+   * @param {string} field - The field name
+   * @returns {boolean} - Whether the element is valid
+   */
+  validateElement($element, field) {
+    if ($element.type === 'checkbox') {
+      return $element.checked;
+    }
+
+    if ($element.type === 'radio') {
+      const name = $element.getAttribute('name');
+      return name ? this.$form.querySelector(`input[name="${name}"]:checked`) !== null : false;
+    }
+
+    return $element.value.trim() !== '';
+  }
+
+  /**
+   * Clear all validation errors
+   */
+  clearErrors() {
+    this.$form.querySelectorAll('.govuk-form-group--error')
+      .forEach($group => $group.classList.remove('govuk-form-group--error'));
+
+    this.$form.querySelectorAll('.govuk-error-message')
+      .forEach($error => $error.remove());
+
+    const $errorSummary = this.$form.querySelector('.govuk-error-summary');
+    if ($errorSummary) {
+      $errorSummary.remove();
+    }
+  }
+
+  /**
+   * Display validation errors
+   * @param {Array<{field: string, element: Element, message: string}>} errors - List of errors
+   */
+  showErrors(errors) {
+    errors.forEach(({element, message}) => {
+      const $formGroup = element.closest('.govuk-form-group');
+      if (!$formGroup) return;
+
+      // Add error class to form group
+      $formGroup.classList.add('govuk-form-group--error');
+
+      const $error = document.createElement('p');
+      $error.className = 'govuk-error-message';
+      $error.innerHTML = `<span class="govuk-visually-hidden">Error:</span> ${message}`;
+
+      const $field = $formGroup.querySelector('.govuk-input, .govuk-fieldset');
+      if ($field) {
+        $field.parentNode?.insertBefore($error, $field);
+      }
+    });
+
+    if (this.config.showErrorSummary && errors.length > 0) {
+      this.createErrorSummary(errors);
+    }
+  }
+
+  /**
+   * Create and insert error summary
+   * @param {Array<{field: string, element: Element, message: string}>} errors - List of errors
+   */
+  createErrorSummary(errors) {
+    const $summary = document.createElement('div');
+    $summary.className = 'govuk-error-summary';
+    $summary.setAttribute('data-module', 'govuk-error-summary');
+    
+    $summary.innerHTML = `
+      <div role="alert">
+        <h2 class="govuk-error-summary__title">
+          There is a problem
+        </h2>
+        <div class="govuk-error-summary__body">
+          <ul class="govuk-list govuk-error-summary__list">
+            ${errors.map(({message}) => `
+              <li>${message}</li>
+            `).join('')}
+          </ul>
+        </div>
+      </div>
+    `;
+
+    // Insert at the top of the form
+    this.$form.insertBefore($summary, this.$form.firstChild);
   }
 
   /**
@@ -110,7 +258,12 @@ export class Button extends GOVUKFrontendComponent {
    * @type {ButtonConfig}
    */
   static defaults = Object.freeze({
-    preventDoubleClick: false
+    preventDoubleClick: false,
+    enableValidation: false,
+    validationSelectors: {},
+    validationMessages: {},
+    focusOnError: true,
+    showErrorSummary: true
   })
 
   /**
@@ -121,7 +274,12 @@ export class Button extends GOVUKFrontendComponent {
    */
   static schema = Object.freeze({
     properties: {
-      preventDoubleClick: { type: 'boolean' }
+      preventDoubleClick: { type: 'boolean' },
+      enableValidation: { type: 'boolean' },
+      validationSelectors: { type: 'object' },
+      validationMessages: { type: 'object' },
+      focusOnError: { type: 'boolean' },
+      showErrorSummary: { type: 'boolean' }
     }
   })
 }
@@ -132,6 +290,11 @@ export class Button extends GOVUKFrontendComponent {
  * @typedef {object} ButtonConfig
  * @property {boolean} [preventDoubleClick=false] - Prevent accidental double
  *   clicks on submit buttons from submitting forms multiple times.
+ * @property {boolean} [enableValidation=false] - Enable form validation
+ * @property {Object.<string, string>} [validationSelectors] - Selectors for elements to validate
+ * @property {Object.<string, string>} [validationMessages] - Custom error messages for fields
+ * @property {boolean} [focusOnError=true] - Focus the first invalid element
+ * @property {boolean} [showErrorSummary=true] - Show error summary at top of form
  */
 
 /**
